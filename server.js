@@ -1,7 +1,7 @@
 const express = require('express');
 const mqtt = require('mqtt');
 const cors = require('cors');
-const app = report = express();
+const app = express();
 
 app.use(express.json());
 
@@ -22,7 +22,7 @@ const COOLDOWN_MS = 3 * 60 * 1000; // 3-minute transmission safety lock
 const client = mqtt.connect('mqtt://mqtt.meshnet.nl');
 
 client.on('connect', () => {
-    console.log('Connected to mqtt.meshnet.nl');
+    console.log('Connected to mqtt.meshnet.nl successfully.');
     // Subscribe directly to the pre-decoded JSON channel wildcard stream for all NL text updates
     client.subscribe('msh/NL/json/#', (err) => {
         if (!err) console.log('Subscribed to translated text channel successfully');
