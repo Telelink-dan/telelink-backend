@@ -1,11 +1,8 @@
 const express = require('express');
 const mqtt = require('mqtt');
 const cors = require('cors');
-// Change line 4 from:
-// const { MeshDevice } = require('@meshtastic/js');
-
-// To exactly this:
 const { MeshDevice } = require('@meshtastic/meshtasticjs');
+
 
 const app = express();
 
