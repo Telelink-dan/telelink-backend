@@ -1,18 +1,19 @@
 const express = require('express');
 const mqtt = require('mqtt');
 const cors = require('cors');
+const { MeshDevice } = require('@meshtastic/js');
 const app = express();
 
 app.use(express.json());
 
 // Enable CORS for your exact Neocities subdomain layout
 app.use(cors({
-    origin: 'https://telelink.neocities.org'
+    origin: 'https://neocities.org'
 }));
 
-// Global variable arrays to store rolling logs
+// Global variable arrays to store decoded text history
 let chatHistory = [
-    { id: 1, sender: 'TeleLink', text: 'Welcome to the live Netherlands Mesh feed!' }
+    { id: 1, sender: 'TeleLink', text: 'Gateway online. Listening for decoded binary packets...' }
 ];
 let messageCounter = 2;
 let lastBroadcastTime = 0;
@@ -23,38 +24,36 @@ const client = mqtt.connect('mqtt://mqtt.meshnet.nl');
 
 client.on('connect', () => {
     console.log('Connected to mqtt.meshnet.nl');
-    // Subscribe to JSON broadcast feed for the entire country
-    client.subscribe('msh/NL/LongFast/json', (err) => {
-        if (!err) console.log('Subscribed to national JSON chat feed');
+    // Subscribe to the raw, binary, encrypted countrywide LongFast channel text stream
+    client.subscribe('msh/NL/2/c/LongFast', (err) => {
+        if (!err) console.log('Subscribed to raw countrywide binary radio feed');
     });
 });
 
-// Listen for incoming messages from across the country
+// Intercept the raw radio waves and decode them in real-time
 client.on('message', (topic, message) => {
     try {
-        const payload = JSON.parse(message.toString());
+        const decodedPacket = MeshDevice.protobuf.MeshPacket.decode(message);
         
-        // Ensure it contains a text payload message string
-        if (payload.type === 'text' && payload.payload?.text) {
-            const senderName = payload.payload.fromStr || payload.from || 'Unknown Node';
-            const messageText = payload.payload.text.trim();
+        // Check for TEXT_MESSAGE_APP (portnum 1)
+        if (decodedPacket.decoded && decodedPacket.decoded.portnum === 1) {
+            const textBytes = decodedPacket.decoded.payload;
+            const messageText = Buffer.from(textBytes).toString('utf8').trim();
+            const senderId = decodedPacket.fromStr || `Node-${decodedPacket.from.toString(16)}`;
 
-            // Prevent recording duplicate reflections of your own web gateway messages
-            if (senderName === 'TeleLink-BH') return;
+            if (senderId === 'TeleLink-BH') return;
 
-            // Add message to rolling local memory storage array
             chatHistory.push({
                 id: messageCounter++,
-                sender: senderName,
+                sender: senderId,
                 text: messageText,
                 timestamp: new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })
             });
 
-            // Keep array trimmed down to avoid performance bottlenecks
             if (chatHistory.length > 30) chatHistory.shift();
         }
     } catch (e) {
-        // Skip malformed packets or telemetry node updates safely
+        // Skip telemetry or status updates quietly
     }
 });
 
@@ -68,7 +67,7 @@ app.get('/api/history', (req, res) => {
     res.json(chatHistory);
 });
 
-// Endpoint to handle web browser broadcasts
+// Endpoint to handle web browser broadcasts (Now properly encoding to binary Protobuf!)
 app.post('/api/broadcast', (req, res) => {
     const now = Date.now();
     if (now - lastBroadcastTime < COOLDOWN_MS) {
@@ -83,21 +82,44 @@ app.post('/api/broadcast', (req, res) => {
 
     lastBroadcastTime = now;
 
-    // Use regular text uplink topic protocol to transmit out
-    const topic = "msh/NL/LongFast/uplink"; 
-    const payload = {
-        text: userMessage,
-        fromStr: "TeleLink-BH"
-    };
+    try {
+        // 1. Convert the plain text string into a binary payload buffer
+        const textPayloadBytes = Buffer.from(userMessage, 'utf8');
 
-    client.publish(topic, JSON.stringify(payload), (err) => {
-        if (!err) {
-            res.json({ success: true, message: "Broadcasted successfully!" });
-        } else {
-            lastBroadcastTime = 0;
-            res.status(500).json({ error: "Failed to forward packet to the mesh broker." });
-        }
-    });
+        // 2. Wrap it inside the official Meshtastic Data sub-packet payload schema
+        const dataPayload = MeshDevice.protobuf.Data.create({
+            portnum: 1, // 1 = TEXT_MESSAGE_APP protocol descriptor
+            payload: textPayloadBytes
+        });
+
+        // 3. Assemble the final complete network MeshPacket wrapper envelope structure
+        const meshPacket = MeshDevice.protobuf.MeshPacket.create({
+            from: 0x12345678, // Dummy web generator ID hex integer
+            to: 0xffffffff,   // Broadcast address target packet locator (all nodes)
+            decoded: dataPayload,
+            id: Math.floor(Math.random() * 0xffffffff),
+            wantAck: false,
+            hopLimit: 3,
+            fromStr: "TeleLink-BH" // The display callsign label tagging your site
+        });
+
+        // 4. Serialize into a raw system binary buffer line
+        const binaryBufferMessage = MeshDevice.protobuf.MeshPacket.encode(meshPacket).finish();
+
+        // 5. Fire the binary packet onto the live country text stream channel topic
+        const topic = "msh/NL/2/c/LongFast"; 
+        client.publish(topic, binaryBufferMessage, (err) => {
+            if (!err) {
+                res.json({ success: true, message: "Broadcasted successfully!" });
+            } else {
+                lastBroadcastTime = 0;
+                res.status(500).json({ error: "Failed to forward packet to the mesh broker." });
+            }
+        });
+    } catch (encodeError) {
+        lastBroadcastTime = 0;
+        res.status(500).json({ error: "Encoding engine failure trying to compile Protobuf packet structure." });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
