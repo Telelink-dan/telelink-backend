@@ -5,14 +5,32 @@ const app = express();
 
 app.use(express.json());
 
-// Enable CORS for your exact Neocities subdomain layout
+// Multi-matching CORS configuration to guarantee the security handshake passes
+const allowedOrigins = [
+    'https://neocities.org',
+    'http://neocities.org',
+    'https://neocities.org/',
+    'http://neocities.org/'
+];
+
 app.use(cors({
-    origin: 'https://neocities.org'
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        // If the origin matches any of our variations, let it through
+        if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('neocities.org')) {
+            return callback(null, true);
+        } else {
+            return callback(null, new Error('CORS Policy Blocked Request'));
+        }
+    },
+    credentials: true
 }));
 
 // Global rolling memory array to store chat logs
 let chatHistory = [
-    { id: 1, sender: 'TeleLink', text: 'Gateway online. Listening to the active Dutch JSON chat feed...' }
+    { id: 1, sender: 'TeleLink', text: 'Welcome to the live Netherlands Mesh feed!' }
 ];
 let messageCounter = 2;
 let lastBroadcastTime = 0;
